@@ -1,0 +1,80 @@
+T_max: 20
+_best_val:
+  em: 0.6839080459770115
+  epoch: 1
+  loss: 0.11960852781849099
+_no_improve_epochs: 0
+backbone_layers:
+- 2
+- 3
+- 7
+batchsize: 6
+betas:
+- 0.9
+- 0.999
+bos_token: 1
+channels: 1
+config: .\config.yaml
+data: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\train.pkl
+debug: false
+decoder_args:
+  attn_on_attn: true
+  cross_attend: true
+  ff_glu: true
+  rel_pos_bias: false
+  use_scalenorm: false
+device: cuda:0
+dim: 256
+early_stopping_min_delta: 0.001
+early_stopping_patience: 3
+encoder_depth: 4
+encoder_structure: hybrid
+eos_token: 2
+epoch: 0
+epochs: 20
+gpu_devices:
+- 0
+heads: 8
+length_penalty: null
+load_chkpt: runs/checkpoints/pix2tex_lora_v2/pix2tex_lora_v2_best.pth
+log_interval: 1000
+lr: 0.0005
+max_dimensions:
+- 1024
+- 256
+max_height: 256
+max_new_tokens: null
+max_seq_len: 1024
+max_width: 1024
+micro_batchsize: -1
+min_dimensions:
+- 1
+- 1
+min_height: 1
+min_width: 1
+model_path: runs/checkpoints
+name: pix2tex_lora_v2
+no_cuda: false
+no_repeat_ngram_size: null
+num_beams: null
+num_layers: 4
+num_tokens: 1175
+optimizer: Adam
+output_path: runs/outputs
+pad: true
+pad_token: 0
+patch_size: 16
+repetition_penalty: null
+sample_eval: 0
+sample_freq: 3000
+sample_render_dir: ''
+sample_report: ''
+save_freq: 1
+scheduler: CosineAnnealingLR
+seed: 42
+testbatchsize: 6
+tokenizer: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\tokenizer.json
+val_samples_per_batch: 4
+valbatches: 50
+valdata: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\val.pkl
+wandb: true

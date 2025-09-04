@@ -1,0 +1,67 @@
+backbone_layers:
+- 2
+- 3
+- 7
+batchsize: 6
+betas:
+- 0.9
+- 0.999
+bos_token: 1
+channels: 1
+config: .\config.yaml
+data: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\train.pkl
+debug: false
+decoder_args:
+  attn_on_attn: true
+  cross_attend: true
+  ff_glu: true
+  rel_pos_bias: false
+  use_scalenorm: false
+device: cuda:0
+dim: 256
+encoder_depth: 4
+encoder_structure: hybrid
+eos_token: 2
+epoch: 15
+epochs: 20
+gamma: 0.9995
+gpu_devices:
+- 0
+heads: 8
+load_chkpt: runs/checkpoints/pix2tex_lora_baseline/pix2tex_lora_baseline_e09_step34977.pth
+lr: 0.0005
+lr_step: 30
+max_dimensions:
+- 1024
+- 256
+max_height: 256
+max_seq_len: 1024
+max_width: 1024
+micro_batchsize: -1
+min_dimensions:
+- 1
+- 1
+min_height: 1
+min_width: 1
+model_path: runs/checkpoints
+name: pix2tex_lora_baseline
+no_cuda: false
+num_layers: 4
+num_tokens: 8000
+optimizer: Adam
+output_path: runs/outputs
+pad: true
+pad_token: 0
+patch_size: 16
+sample_eval: 0
+sample_freq: 3000
+sample_render_dir: ''
+sample_report: ''
+save_freq: 1
+scheduler: StepLR
+seed: 42
+testbatchsize: 8
+tokenizer: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\tokenizer.json
+valbatches: 50
+valdata: C:\Users\quenc\Desktop\CopilotEdu\training\pix2tex_lora\dataset\val.pkl
+wandb: true
