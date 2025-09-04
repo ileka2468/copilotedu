@@ -1,0 +1,19 @@
+# Minimal training deps for LoRA fine-tuning of pix2tex
+# Install CUDA-enabled torch manually per your system (see https://pytorch.org/get-started/locally/)
+
+# Core
+torch
+numpy
+Pillow
+matplotlib
+
+# LoRA / PEFT
+peft>=0.10.0
+transformers>=4.41.0
+
+# Pix2tex (training extras include dataset helpers)
+pix2tex[train]
+
+# Utilities
+tqdm
+jsonlines

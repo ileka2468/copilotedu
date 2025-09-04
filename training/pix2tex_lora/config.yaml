@@ -1,0 +1,81 @@
+gpu_devices: null
+no_cuda: false
+batchsize: 6
+micro_batchsize: -1
+betas: [0.9, 0.999]
+lr: 0.0005
+
+optimizer: Adam
+scheduler: CosineAnnealingLR
+T_max: 20 # Total number of epochs for the scheduler to run
+
+# Image/sequence sizes
+channels: 1
+max_height: 256
+min_height: 1
+min_width: 1
+max_width: 1024
+patch_size: 16
+encoder_structure: hybrid
+backbone_layers:
+- 2
+- 3
+- 7
+
+dim: 256
+encoder_depth: 4
+heads: 8
+num_layers: 4
+
+# decoder args
+decoder_args:
+  attn_on_attn: true
+  cross_attend: true
+  ff_glu: true
+  rel_pos_bias: false
+  use_scalenorm: false
+
+# tokens (Corrected and confirmed)
+num_tokens: 1175
+pad_token: 0
+bos_token: 1
+eos_token: 2
+max_seq_len: 1024
+pad: true
+
+# data paths
+data: dataset/train.pkl
+valdata: dataset/val.pkl
+tokenizer: dataset/tokenizer.json
+
+# --- CRITICAL CHANGE ---
+# Removed load_chkpt to ensure we don't load old, incompatible weights.
+load_chkpt: runs/checkpoints/pix2tex_lora_v2/pix2tex_lora_v2_best.pth
+
+# --- CRITICAL CHANGE ---
+# Reset epoch to 0 to start training from the very beginning.
+epoch: 0 
+epochs: 20
+
+sample_freq: 3000
+save_freq: 1
+seed: 42
+model_path: runs/checkpoints
+
+# --- RECOMMENDED CHANGE ---
+# Using a new name to avoid overwriting old results.
+name: pix2tex_lora_v2
+
+output_path: runs/outputs
+
+# --- RECOMMENDED CHANGE ---
+# Matched testbatchsize to batchsize to prevent potential OOM errors during validation.
+testbatchsize: 6 
+
+valbatches: 50
+wandb: false
+
+log_interval: 1000
+early_stopping_patience: 3
+early_stopping_min_delta: 0.001
+val_samples_per_batch: 4

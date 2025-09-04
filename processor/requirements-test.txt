@@ -1,0 +1,12 @@
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+fastapi
+uvicorn
+PyMuPDF
+Pillow
+pytesseract
+openai>=1.0.0
+numpy
+aiohttp
