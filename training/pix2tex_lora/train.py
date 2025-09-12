@@ -771,13 +771,56 @@ def train(args):
     except Exception:
         pass
     load_chk = args.get('load_chkpt', None)
-    if load_chk is not None:
+    resume_path = args.get('resume', None)
+    
+    if resume_path is not None and os.path.exists(resume_path):
+        # Load full training state
+        global_step = load_training_state(resume_path)
+    elif load_chk is not None:
+        # Load only model weights (old behavior)
         sd = torch.load(load_chk, map_location=device)
         load_state_dict_forgiving(model, sd, prefix="train: ")
+        global_step = 0
+    else:
+        global_step = 0
 
     def save_models(e, step=0):
         torch.save(model.state_dict(), os.path.join(out_path, '%s_e%02d_step%02d.pth' % (args.name, e+1, step)))
         yaml.dump(dict(args), open(os.path.join(out_path, 'config.yaml'), 'w+', encoding='utf-8'))
+    
+    def save_training_state(e, step):
+        """Save full training state: model, optimizer, scheduler, epoch, global_step"""
+        state = {
+            'model': model.state_dict(),
+            'optimizer': opt.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'epoch': e,
+            'global_step': step,
+            'args': dict(args)
+        }
+        torch.save(state, os.path.join(out_path, '%s_e%02d_step%02d_state.pth' % (args.name, e+1, step)))
+        print(f"[state] Saved training state to {out_path}/{args.name}_e{e+1:02d}_step{step:02d}_state.pth")
+    
+    def load_training_state(path):
+        """Load full training state and restore model, optimizer, scheduler, epoch"""
+        print(f"[state] Loading training state from {path}")
+        state = torch.load(path, map_location=device)
+        
+        # Restore model
+        model.load_state_dict(state['model'])
+        
+        # Restore optimizer
+        opt.load_state_dict(state['optimizer'])
+        
+        # Restore scheduler
+        scheduler.load_state_dict(state['scheduler'])
+        
+        # Update args with saved epoch
+        args.epoch = state['epoch'] + 1  # Continue from next epoch
+        global_step = state['global_step']
+        
+        print(f"[state] Restored to epoch {args.epoch}, global_step {global_step}")
+        return global_step
 
     opt = get_optimizer(args.optimizer)(model.parameters(), args.lr, betas=args.betas)
     # Select scheduler with appropriate arguments
@@ -922,15 +965,19 @@ def train(args):
                         if args._no_improve_epochs >= patience:
                             print("[early-stopping] stopping training.")
                             save_models(e, step=len(dataloader))
+                            save_training_state(e, step=len(dataloader))
                             return
             # Periodic save
             if (e+1) % args.save_freq == 0:
                 save_models(e, step=len(dataloader))
+                save_training_state(e, step=len(dataloader))
     except KeyboardInterrupt:
         if e >= 2:
             save_models(e, step=i)
+            save_training_state(e, step=i)
         raise KeyboardInterrupt
     save_models(e, step=len(dataloader))
+    save_training_state(e, step=len(dataloader))
 
 
 if __name__ == '__main__':
@@ -947,6 +994,7 @@ if __name__ == '__main__':
     parser.add_argument('--length-penalty', type=float, default=None, help='Length penalty for beam search')
     parser.add_argument('--repetition-penalty', type=float, default=None, help='Repetition penalty during generation')
     parser.add_argument('--max-new-tokens', type=int, default=None, help='Maximum new tokens to generate')
+    parser.add_argument('--resume', type=str, default=None, help='Path to training state file (.pth) to resume training from')
     parsed_args = parser.parse_args()
     if parsed_args.config is None:
         with in_model_path():

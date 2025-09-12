@@ -50,7 +50,7 @@ tokenizer: dataset/tokenizer.json
 
 # --- CRITICAL CHANGE ---
 # Removed load_chkpt to ensure we don't load old, incompatible weights.
-load_chkpt: runs/checkpoints/pix2tex_lora_v2/pix2tex_lora_v2_best.pth
+# load_chkpt: runs/checkpoints/pix2tex_lora_v2/pix2tex_lora_v2_best.pth
 
 # --- CRITICAL CHANGE ---
 # Reset epoch to 0 to start training from the very beginning.
