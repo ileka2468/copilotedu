@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import re
 import time
 import inspect
+from contextlib import nullcontext
 
 # Ensure wandb is disabled before any pix2tex modules import it
 os.environ.setdefault("WANDB_DISABLED", "true")
@@ -95,6 +96,7 @@ def _validate(model, valdataloader, args, device):
         _num_tokens = (max(_tv.values()) + 1) if _tv else None
     except Exception:
         pass
+
     def _clamp_ids_tensor(t: torch.Tensor) -> torch.Tensor:
         try:
             if _num_tokens and isinstance(t, torch.Tensor):
@@ -102,6 +104,7 @@ def _validate(model, valdataloader, args, device):
         except Exception:
             pass
         return t
+
     for bi, (seq, im) in enumerate(tqdm(iter(valdataloader), desc='Validating'), start=1):
         if bi > max_batches:
             break
@@ -191,9 +194,11 @@ def _sample_eval(args, max_samples=10):
     loaded = Im2LatexDataset().load(args.valdata)
     cfg_dir = os.path.dirname(os.path.abspath(args.get('config', 'config.yaml')))
     items = []  # list of (abs_img_path, gt_eq)
+
     def _is_img_path(s: str) -> bool:
         s_low = s.lower()
         return s_low.endswith(('.png', '.jpg', '.jpeg', '.bmp', '.webp', '.tif', '.tiff'))
+
     if isinstance(loaded, list):
         for tup in loaded:
             try:
@@ -373,10 +378,8 @@ def _sample_eval(args, max_samples=10):
         s = re.sub(r"\b[A-Z]\b\s*\\cdot\s*", " ", s)
         s = re.sub(r"(?<=\\cdot)\s*[A-Z](?![A-Za-z])", "", s)
         # Make differentials consistent and keep \cdot with proper spacing
-        # e.g., x \\cdot dx -> x \\cdot \, dx ;  x\\cdot\, d t -> x \\cdot \, dt ; x \\cdot\\dx -> x \\cdot \, dx
         s = re.sub(r"\\cdot\s*\\,?\s*d\s*([A-Za-z])", r" \\cdot \\, d\1", s)
         s = re.sub(r"\\cdot\\?d\s*([A-Za-z])", r" \\cdot \\, d\1", s)
-        # Very specific fallback for '\\cdotdx' with no spaces
         s = s.replace(r"\cdotdx", r" \cdot \, dx")
         s = re.sub(r"\\cdot\s*dx\b", r" \\cdot \\, dx", s)
         s = re.sub(r"\s+d\s*([A-Za-z])", r" \\, d\1", s)
@@ -387,7 +390,7 @@ def _sample_eval(args, max_samples=10):
         s = re.sub(r"\\end\{pmatrix\}\s*\)", r"\\end{pmatrix}", s)
         # Trim
         return s.strip()
-    
+
     def _clamp_ids_tensor(t: torch.Tensor) -> torch.Tensor:
         """Clamp token IDs to valid vocab range to avoid device-side asserts during decode."""
         try:
@@ -654,6 +657,13 @@ def train(args):
     _inspect_pickle(args.data, cfg_dir)
     _inspect_pickle(args.valdata, cfg_dir)
 
+    def _dims(args_obj):
+        max_dims = (int(getattr(args_obj, 'max_height', 256) or 256),
+                    int(getattr(args_obj, 'max_width', 1024) or 1024))
+        min_dims = (int(getattr(args_obj, 'min_height', 1) or 1),
+                    int(getattr(args_obj, 'min_width', 1) or 1))
+        return max_dims, min_dims
+
     def _build_dataset_from_list(items, base_dir, label, test=False):
         """Convert list[(rel_img, equation)] into Im2LatexDataset grouped by image dimensions.
         base_dir should be the directory containing the config.yaml; images are usually under base_dir/dataset/...
@@ -665,6 +675,7 @@ def train(args):
                 logging.warning(f"Loading cached dataset: {cache_path}")
                 cached = Im2LatexDataset().load(cache_path)
                 if isinstance(cached, Im2LatexDataset):
+                    max_dims, min_dims = _dims(args)
                     # Ensure runtime params are up to date
                     cached.update(
                         tokenizer=args.tokenizer,
@@ -673,8 +684,8 @@ def train(args):
                         test=test,
                         pad=args.pad,
                         max_seq_len=args.max_seq_len,
-                        max_dimensions=args.max_dimensions,
-                        min_dimensions=args.min_dimensions,
+                        max_dimensions=max_dims,
+                        min_dimensions=min_dims,
                     )
                     return cached
         except Exception:
@@ -705,6 +716,7 @@ def train(args):
                 continue
         logging.warning(f"Constructed dataset from list: items_in={len(items)} items_added={added} buckets={len(ds.data)}")
         # initialize tokenizer and batch settings via update()
+        max_dims, min_dims = _dims(args)
         ds.update(
             tokenizer=args.tokenizer,
             batchsize=(args.testbatchsize if test else args.batchsize),
@@ -712,8 +724,8 @@ def train(args):
             test=test,
             pad=args.pad,
             max_seq_len=args.max_seq_len,
-            max_dimensions=args.max_dimensions,
-            min_dimensions=args.min_dimensions,
+            max_dimensions=max_dims,
+            min_dimensions=min_dims,
         )
         # Save cache for future runs
         try:
@@ -729,16 +741,34 @@ def train(args):
         dataloader = _build_dataset_from_list(dataloader, cfg_dir, label='train', test=False)
     else:
         # keep_smaller_batches to avoid zero batches when small dataset or heavy filtering
-        dataloader.update(batchsize=args.batchsize, keep_smaller_batches=True, test=False, **{k: v for k, v in dict(args).items() if k not in ['batchsize']})
+        max_dims, min_dims = _dims(args)
+        dataloader.update(
+            tokenizer=args.tokenizer,
+            batchsize=args.batchsize,
+            keep_smaller_batches=True,
+            test=False,
+            pad=args.pad,
+            max_seq_len=args.max_seq_len,
+            max_dimensions=max_dims,
+            min_dimensions=min_dims,
+        )
 
     valdataloader = Im2LatexDataset().load(args.valdata)
     if isinstance(valdataloader, list):
         cfg_dir = os.path.dirname(os.path.abspath(args.get('config', 'config.yaml')))
         valdataloader = _build_dataset_from_list(valdataloader, cfg_dir, label='val', test=True)
     else:
-        valargs = args.copy()
-        valargs.update(batchsize=args.testbatchsize, keep_smaller_batches=True, test=True)
-        valdataloader.update(**valargs)
+        max_dims, min_dims = _dims(args)
+        valdataloader.update(
+            tokenizer=args.tokenizer,
+            batchsize=args.testbatchsize,
+            keep_smaller_batches=True,
+            test=True,
+            pad=args.pad,
+            max_seq_len=args.max_seq_len,
+            max_dimensions=max_dims,
+            min_dimensions=min_dims,
+        )
     try:
         logging.warning(f"Train loader batches: {len(dataloader)} | Val loader batches: {len(valdataloader)}")
     except Exception:
@@ -764,7 +794,50 @@ def train(args):
     out_path = os.path.join(args.model_path, args.name)
     os.makedirs(out_path, exist_ok=True)
 
-    # If supported, resize embeddings to tokenizer size (helps when loading preexisting checkpoints with different heads)
+    # Enable gradient checkpointing for memory efficiency
+    if hasattr(model, 'gradient_checkpointing_enable'):
+        try:
+            model.gradient_checkpointing_enable()
+            print("[optimization] Enabled gradient checkpointing")
+        except Exception:
+            pass
+
+    # Try to enable TF32 if on Ampere+
+    try:
+        if torch.cuda.is_available() and not args.no_cuda:
+            cc = torch.cuda.get_device_capability()
+            if cc >= (8, 0):
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.backends.cudnn.allow_tf32 = True
+                print("[optimization] Enabled TF32")
+    except Exception as e:
+        print(f"[optimization] TF32 gating failed: {e}")
+
+    # Hardware-specific optimizations
+    print("[optimization] Applying hardware-specific optimizations...")
+
+    # Enable cuDNN benchmarking for faster convolutions (GPU only)
+    if torch.cuda.is_available() and not args.no_cuda:
+        torch.backends.cudnn.benchmark = True
+        print("[optimization] Enabled cuDNN benchmarking")
+
+    # Set memory allocation strategy
+    try:
+        if torch.cuda.is_available() and not args.no_cuda:
+            torch.cuda.set_per_process_memory_fraction(0.95)
+            print("[optimization] Set memory allocation strategy")
+    except Exception as e:
+        print(f"[optimization] Could not set per-process memory fraction: {e}")
+
+    # Try to compile model with torch.compile for better performance
+    try:
+        if hasattr(torch, 'compile') and torch.cuda.is_available() and not args.no_cuda:
+            model = torch.compile(model, mode="reduce-overhead")
+            print("[optimization] Enabled model compilation with torch.compile")
+    except Exception as e:
+        print(f"[optimization] Model compilation failed: {e}")
+
+    # If supported, resize embeddings to tokenizer size (helps with old checkpoints)
     try:
         if hasattr(model, 'resize_token_embeddings') and callable(getattr(model, 'resize_token_embeddings')) and getattr(args, 'num_tokens', None):
             model.resize_token_embeddings(int(args.num_tokens))
@@ -772,22 +845,35 @@ def train(args):
         pass
     load_chk = args.get('load_chkpt', None)
     resume_path = args.get('resume', None)
-    
-    if resume_path is not None and os.path.exists(resume_path):
-        # Load full training state
-        global_step = load_training_state(resume_path)
-    elif load_chk is not None:
-        # Load only model weights (old behavior)
-        sd = torch.load(load_chk, map_location=device)
-        load_state_dict_forgiving(model, sd, prefix="train: ")
-        global_step = 0
-    else:
-        global_step = 0
 
+    # ----- Optimizer and Schedulers -----
+    weight_decay = getattr(args, 'weight_decay', 0.0)
+    opt = get_optimizer(args.optimizer)(model.parameters(), args.lr, betas=args.betas, weight_decay=weight_decay)
+
+    if args.scheduler == 'CosineAnnealingLR':
+        T_max = getattr(args, 'T_max', args.epochs)
+        scheduler = get_scheduler(args.scheduler)(opt, T_max=T_max)
+    elif args.scheduler == 'StepLR':
+        scheduler = get_scheduler(args.scheduler)(opt, step_size=args.lr_step, gamma=args.gamma)
+    else:
+        # Fallback for other schedulers; rely on their defaults or config-covered params
+        scheduler = get_scheduler(args.scheduler)(opt)
+
+    warmup_ratio = getattr(args, 'warmup_ratio', 0.0)
+    if warmup_ratio > 0:
+        from torch.optim.lr_scheduler import LinearLR
+        warmup_epochs = int(args.epochs * warmup_ratio)
+        warmup_scheduler = LinearLR(opt, start_factor=0.1, total_iters=warmup_epochs)
+        # Chain warmup and main scheduler
+        from torch.optim.lr_scheduler import SequentialLR
+        scheduler = SequentialLR(opt, schedulers=[warmup_scheduler, scheduler], milestones=[warmup_epochs])
+        print(f"[optimization] Added {warmup_epochs} epochs warmup")
+
+    # ----- Resume / checkpoint (after opt/scheduler so we can load their states) -----
     def save_models(e, step=0):
         torch.save(model.state_dict(), os.path.join(out_path, '%s_e%02d_step%02d.pth' % (args.name, e+1, step)))
         yaml.dump(dict(args), open(os.path.join(out_path, 'config.yaml'), 'w+', encoding='utf-8'))
-    
+
     def save_training_state(e, step):
         """Save full training state: model, optimizer, scheduler, epoch, global_step"""
         state = {
@@ -800,41 +886,54 @@ def train(args):
         }
         torch.save(state, os.path.join(out_path, '%s_e%02d_step%02d_state.pth' % (args.name, e+1, step)))
         print(f"[state] Saved training state to {out_path}/{args.name}_e{e+1:02d}_step{step:02d}_state.pth")
-    
+
     def load_training_state(path):
         """Load full training state and restore model, optimizer, scheduler, epoch"""
         print(f"[state] Loading training state from {path}")
         state = torch.load(path, map_location=device)
-        
+
         # Restore model
         model.load_state_dict(state['model'])
-        
+
         # Restore optimizer
         opt.load_state_dict(state['optimizer'])
-        
+
         # Restore scheduler
         scheduler.load_state_dict(state['scheduler'])
-        
+
         # Update args with saved epoch
         args.epoch = state['epoch'] + 1  # Continue from next epoch
         global_step = state['global_step']
-        
+
         print(f"[state] Restored to epoch {args.epoch}, global_step {global_step}")
         return global_step
 
-    opt = get_optimizer(args.optimizer)(model.parameters(), args.lr, betas=args.betas)
-    # Select scheduler with appropriate arguments
-    if args.scheduler == 'CosineAnnealingLR':
-        scheduler = get_scheduler(args.scheduler)(opt, T_max=args.epochs)
-    elif args.scheduler == 'StepLR':
-        scheduler = get_scheduler(args.scheduler)(opt, step_size=args.lr_step, gamma=args.gamma)
+    if resume_path is not None and os.path.exists(resume_path):
+        # Load full training state
+        global_step = load_training_state(resume_path)
+    elif load_chk is not None:
+        # Load only model weights (old behavior)
+        sd = torch.load(load_chk, map_location=device)
+        load_state_dict_forgiving(model, sd, prefix="train: ")
+        global_step = 0
     else:
-        # Fallback for other schedulers; rely on their defaults or config-covered params
-        scheduler = get_scheduler(args.scheduler)(opt)
+        global_step = 0
+
+    # AMP autocast context depending on CUDA
+    use_amp = torch.cuda.is_available() and not args.no_cuda
+    autocast_ctx = torch.cuda.amp.autocast if use_amp else nullcontext
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     microbatch = args.get('micro_batchsize', -1)
     if microbatch == -1:
         microbatch = args.batchsize
+
+    # Initialize profiler if enabled
+    profiler = None
+    enable_profiling = getattr(args, 'enable_profiling', False)
+    profile_epochs = getattr(args, 'profile_epochs', [])
+    profile_memory = getattr(args, 'profile_memory', True)
+    profile_shape = getattr(args, 'profile_shape', True)
 
     try:
         # Logging helpers
@@ -843,31 +942,67 @@ def train(args):
         step_interval = getattr(args, 'log_interval', 100)
         ema_beta = getattr(args, 'ema_beta', 0.98)
         ema_loss = None
+
         for e in range(args.epoch, args.epochs):
+            # Enable profiling for specific epochs
+            if enable_profiling and e in profile_epochs:
+                print(f"[profiling] Starting profiling for epoch {e+1}")
+                profiler = torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA] if torch.cuda.is_available() else [torch.profiler.ProfilerActivity.CPU],
+                    schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=1),
+                    on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./logs/profile_epoch_{e+1}'),
+                    record_shapes=profile_shape,
+                    profile_memory=profile_memory,
+                    with_stack=True
+                )
+                profiler.start()
+            else:
+                profiler = None
             args.epoch = e
             dset = tqdm(iter(dataloader))
             epoch_loss_sum, epoch_batches = 0.0, 0
             epoch_start = time.time()
             for i, (seq, im) in enumerate(dset, start=1):
                 if seq is not None and im is not None:
-                    opt.zero_grad()
+                    opt.zero_grad(set_to_none=True)
                     total_loss = 0.0
                     last_grad_norm = None
                     for j in range(0, len(im), microbatch):
                         tgt_seq = seq['input_ids'][j:j+microbatch].to(device)
                         tgt_mask = seq['attention_mask'][j:j+microbatch].bool().to(device)
-                        loss = model.data_parallel(
-                            im[j:j+microbatch].to(device),
-                            device_ids=args.gpu_devices,
-                            tgt_seq=tgt_seq,
-                            mask=tgt_mask
-                        ) * microbatch / args.batchsize
-                        loss.backward()
+                        # Mixed precision training with autocast (GPU only)
+                        with autocast_ctx():
+                            loss = model.data_parallel(
+                                im[j:j+microbatch].to(device),
+                                device_ids=args.gpu_devices,
+                                tgt_seq=tgt_seq,
+                                mask=tgt_mask
+                            ) * microbatch / args.batchsize
+                        if use_amp:
+                            scaler.scale(loss).backward()
+                        else:
+                            loss.backward()
                         total_loss += float(loss.item())
+
+                    # Unscale before clipping when using AMP
+                    if use_amp:
                         try:
-                            last_grad_norm = float(torch.nn.utils.clip_grad_norm_(model.parameters(), 1).item())
+                            scaler.unscale_(opt)
                         except Exception:
-                            last_grad_norm = None
+                            pass
+                    try:
+                        gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        last_grad_norm = float(gn.item() if hasattr(gn, 'item') else float(gn))
+                    except Exception:
+                        last_grad_norm = None
+
+                    if use_amp:
+                        scaler.step(opt)
+                        scaler.update()
+                    else:
+                        opt.step()
+                    scheduler.step()
+
                     # Update EMA loss after aggregating microbatches
                     try:
                         if ema_loss is None:
@@ -876,8 +1011,7 @@ def train(args):
                             ema_loss = ema_beta * ema_loss + (1.0 - ema_beta) * total_loss
                     except Exception:
                         pass
-                    opt.step()
-                    scheduler.step()
+
                     epoch_loss_sum += total_loss
                     epoch_batches += 1
                     # Update tqdm
@@ -906,8 +1040,19 @@ def train(args):
                         msg = f"[epoch {e+1} step {i}] loss={total_loss:.4f} ema={(f'{ema_loss:.4f}' if ema_loss is not None else 'n/a')} lr={(lr if lr is not None else 'n/a')} grad_norm={(f'{last_grad_norm:.3f}' if last_grad_norm is not None else 'n/a')} -> {trend}"
                         print(msg, flush=True)
                         last_print_loss = total_loss
+
+                    # Step profiler if active
+                    if profiler is not None:
+                        profiler.step()
                 # Skip BLEU/token eval on Windows to avoid torchtext
                 # bleu_score, edit_distance, token_accuracy = evaluate_noop()
+
+            # Stop profiler at end of epoch
+            if profiler is not None:
+                print(f"[profiling] Stopping profiling for epoch {e+1}")
+                profiler.stop()
+                profiler = None
+
             # Epoch-end summary
             epoch_time = time.time() - epoch_start
             avg_loss = (epoch_loss_sum / max(1, epoch_batches)) if epoch_batches else float('nan')
