@@ -153,8 +153,8 @@ dmypy.json
 # AI model files
 *.pkl
 *.joblib
-# models/
-# checkpoints/
+models/
+checkpoints/
 .kiro/
 processor/scripts/
 dataset/

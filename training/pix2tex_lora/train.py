@@ -796,37 +796,19 @@ def train(args):
             model.resize_token_embeddings(int(args.num_tokens))
     except Exception:
         pass
-    load_chk = args.get('load_chkpt', None)
-    resume_path = args.get('resume', None)
-
-    if resume_path is not None and os.path.exists(resume_path):
-        # Load full training state
-        global_step = load_training_state(resume_path)
-    elif load_chk is not None:
-        # Load only model weights (old behavior)
-        sd = torch.load(load_chk, map_location=device)
-        load_state_dict_forgiving(model, sd, prefix="train: ")
-        global_step = 0
+    
+    # Create optimizer and scheduler first (needed for checkpoint loading)
+    opt = get_optimizer(args.optimizer)(model.parameters(), args.lr, betas=args.betas)
+    # Select scheduler with appropriate arguments
+    if args.scheduler == 'CosineAnnealingLR':
+        scheduler = get_scheduler(args.scheduler)(opt, T_max=args.epochs)
+    elif args.scheduler == 'StepLR':
+        scheduler = get_scheduler(args.scheduler)(opt, step_size=args.lr_step, gamma=args.gamma)
     else:
-        global_step = 0
-
-    def save_models(e, step=0):
-        torch.save(model.state_dict(), os.path.join(out_path, '%s_e%02d_step%02d.pth' % (args.name, e+1, step)))
-        yaml.dump(dict(args), open(os.path.join(out_path, 'config.yaml'), 'w+', encoding='utf-8'))
-
-    def save_training_state(e, step):
-        """Save full training state: model, optimizer, scheduler, epoch, global_step"""
-        state = {
-            'model': model.state_dict(),
-            'optimizer': opt.state_dict(),
-            'scheduler': scheduler.state_dict(),
-            'epoch': e,
-            'global_step': step,
-            'args': dict(args)
-        }
-        torch.save(state, os.path.join(out_path, '%s_e%02d_step%02d_state.pth' % (args.name, e+1, step)))
-        print(f"[state] Saved training state to {out_path}/{args.name}_e{e+1:02d}_step{step:02d}_state.pth")
-
+        # Fallback for other schedulers; rely on their defaults or config-covered params
+        scheduler = get_scheduler(args.scheduler)(opt)
+    
+    # Define load_training_state function after opt/scheduler are created
     def load_training_state(path):
         """Load full training state and restore model, optimizer, scheduler, epoch"""
         print(f"[state] Loading training state from {path}")
@@ -847,16 +829,20 @@ def train(args):
 
         print(f"[state] Restored to epoch {args.epoch}, global_step {global_step}")
         return global_step
+    
+    load_chk = args.get('load_chkpt', None)
+    resume_path = args.get('resume', None)
 
-    opt = get_optimizer(args.optimizer)(model.parameters(), args.lr, betas=args.betas)
-    # Select scheduler with appropriate arguments
-    if args.scheduler == 'CosineAnnealingLR':
-        scheduler = get_scheduler(args.scheduler)(opt, T_max=args.epochs)
-    elif args.scheduler == 'StepLR':
-        scheduler = get_scheduler(args.scheduler)(opt, step_size=args.lr_step, gamma=args.gamma)
+    if resume_path is not None and os.path.exists(resume_path):
+        # Load full training state
+        global_step = load_training_state(resume_path)
+    elif load_chk is not None:
+        # Load only model weights (old behavior)
+        sd = torch.load(load_chk, map_location=device)
+        load_state_dict_forgiving(model, sd, prefix="train: ")
+        global_step = 0
     else:
-        # Fallback for other schedulers; rely on their defaults or config-covered params
-        scheduler = get_scheduler(args.scheduler)(opt)
+        global_step = 0
 
     microbatch = args.get('micro_batchsize', -1)
     if microbatch == -1:
@@ -1067,6 +1053,25 @@ def train(args):
         raise KeyboardInterrupt
     save_models(e, step=len(dataloader))
     save_training_state(e, step=len(dataloader))
+
+
+def save_models(e, step=0):
+    torch.save(model.state_dict(), os.path.join(out_path, '%s_e%02d_step%02d.pth' % (args.name, e+1, step)))
+    yaml.dump(dict(args), open(os.path.join(out_path, 'config.yaml'), 'w+', encoding='utf-8'))
+
+
+def save_training_state(e, step):
+    """Save full training state: model, optimizer, scheduler, epoch, global_step"""
+    state = {
+        'model': model.state_dict(),
+        'optimizer': opt.state_dict(),
+        'scheduler': scheduler.state_dict(),
+        'epoch': e,
+        'global_step': step,
+        'args': dict(args)
+    }
+    torch.save(state, os.path.join(out_path, '%s_e%02d_step%02d_state.pth' % (args.name, e+1, step)))
+    print(f"[state] Saved training state to {out_path}/{args.name}_e{e+1:02d}_step{step:02d}_state.pth")
 
 
 if __name__ == '__main__':
